@@ -1,0 +1,6 @@
+@TrixCompareDb_HostAddress = http://localhost:5187
+
+GET {{TrixCompareDb_HostAddress}}
+Accept: application/json
+
+
