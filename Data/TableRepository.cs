@@ -135,5 +135,40 @@ namespace TrixCompareDb.Data
 
             return tables;
         }
+
+        /// <summary>
+        /// Resolves a database name/key to a connection string.
+        /// Follows the same logic as GetTable to ensure consistent database identification.
+        /// </summary>
+        public string GetConnectionString(string dbName)
+        {
+            var connString = _config.GetConnectionString(dbName);
+
+            if (string.IsNullOrEmpty(connString))
+            {
+                var section = _config.GetSection("ConnectionStrings");
+                foreach (var child in section.GetChildren())
+                {
+                    var candidate = child.Value;
+                    if (string.IsNullOrEmpty(candidate))
+                        continue;
+                    try
+                    {
+                        var builder = new SqlConnectionStringBuilder(candidate);
+                        if (string.Equals(builder.InitialCatalog, dbName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            connString = candidate;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore invalid connection strings
+                    }
+                }
+            }
+
+            return connString;
+        }
     }
 }

@@ -14,11 +14,13 @@ namespace TrixCompareDb.Controllers
     {
         private readonly TableRepository _repo;
         private readonly CompareTables _comparer;
+        private readonly UpdateTableService _updateService;
 
-        public CompareController(TableRepository repo, CompareTables comparer)
+        public CompareController(TableRepository repo, CompareTables comparer, UpdateTableService updateService)
         {
             _repo = repo;
             _comparer = comparer;
+            _updateService = updateService;
         }
 
         [HttpPost]
@@ -31,6 +33,32 @@ namespace TrixCompareDb.Controllers
             var result = _comparer.Compare(source, target);
 
             return Ok(result);
+        }
+
+        [HttpPost("update")]
+        public async Task<IActionResult> Update([FromBody] CompareRequest request)
+        {
+            // Validate request
+            if (string.IsNullOrEmpty(request.DatabaseSource) || 
+                string.IsNullOrEmpty(request.DatabaseTarget) || 
+                string.IsNullOrEmpty(request.TableName))
+            {
+                return BadRequest("DatabaseSource, DatabaseTarget, and TableName are required.");
+            }
+
+            var result = await _updateService.UpdateTargetTableAsync(
+                request.DatabaseSource,
+                request.DatabaseTarget,
+                request.TableName);
+
+            if (result.Success)
+            {
+                return Ok(result);
+            }
+            else
+            {
+                return StatusCode(500, result);
+            }
         }
     }
 }

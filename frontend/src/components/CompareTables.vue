@@ -28,6 +28,7 @@
       </label>
 
       <button @click="compare" :disabled="loading">Confronta</button>
+      <button @click="performUpdate" :disabled="loading || rows.length === 0" class="update-btn">Update Target</button>
     </div>
 
     <div class="status-line">
@@ -44,23 +45,27 @@
         </div>
 
         <div class="pair">
-          <table class="side-table source-table">
-            <tbody>
-              <tr v-for="key in getKeys(row)" :key="key" :class="getRowClass(row)">
-                <td class="col-key">{{ key }}</td>
-                <td class="col-val"><pre class="cell-pre">{{ formatValue(getSourceValue(row, key)) }}</pre></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-scroll-wrapper">
+            <table class="side-table source-table">
+              <tbody>
+                <tr v-for="key in getKeys(row)" :key="key" :class="getRowClass(row)">
+                  <td class="col-key">{{ key }}</td>
+                  <td class="col-val"><pre class="cell-pre">{{ formatValue(getSourceValue(row, key)) }}</pre></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-          <table class="side-table target-table">
-            <tbody>
-              <tr v-for="key in getKeys(row)" :key="key" :class="getRowClass(row)">
-                <td class="col-key">{{ key }}</td>
-                <td class="col-val"><pre class="cell-pre">{{ formatValue(getTargetValue(row, key)) }}</pre></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-scroll-wrapper">
+            <table class="side-table target-table">
+              <tbody>
+                <tr v-for="key in getKeys(row)" :key="key" :class="getRowClass(row)">
+                  <td class="col-key">{{ key }}</td>
+                  <td class="col-val"><pre class="cell-pre">{{ formatValue(getTargetValue(row, key)) }}</pre></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -111,6 +116,38 @@ async function compare() {
   } catch (e) {
     error.value = e?.message || String(e)
   } finally {
+    loading.value = false
+  }
+}
+
+async function performUpdate() {
+  if (!confirm('This will overwrite the target table to match the source table. This is a destructive action. Continue?')) {
+    return
+  }
+
+  loading.value = true
+  error.value = null
+  try {
+    const url = apiUrl('/api/compare/update')
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        databaseSource: databaseSource.value,
+        databaseTarget: databaseTarget.value,
+        tableName: tableName.value
+      })
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status} ${res.statusText} ${text}`)
+    }
+    const data = await res.json()
+    error.value = null
+    // Re-run comparison to refresh the view
+    await compare()
+  } catch (e) {
+    error.value = e?.message || String(e)
     loading.value = false
   }
 }
@@ -198,6 +235,25 @@ function formatValue(v) {
   cursor: pointer;
 }
 
+.controls button.update-btn {
+  background-color: #ff9800;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 600;
+}
+
+.controls button.update-btn:hover:not(:disabled) {
+  background-color: #e68900;
+}
+
+.controls button.update-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
 .status-line {
   margin-bottom: 12px;
 }
@@ -277,6 +333,11 @@ function formatValue(v) {
 .pair {
   display: flex;
   gap: 12px;
+}
+.table-scroll-wrapper {
+  flex: 1;
+  overflow-x: auto;
+  max-width: 100%;
 }
 .side-table {
   width: 50%;

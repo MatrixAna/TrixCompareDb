@@ -37,6 +37,11 @@
               <span v-if="!loading">Confronta</span>
               <span v-else>Caricamento...</span>
             </button>
+            <button class="update-btn" @click="performUpdate" :disabled="loading || rows.length === 0">
+              <span v-if="loading" class="spinner" aria-hidden="true"></span>
+              <span v-if="!loading">Update Target</span>
+              <span v-else>Caricamento...</span>
+            </button>
           </div>
         </div>
 
@@ -248,6 +253,39 @@ async function compare() {
   }
 }
 
+/* Update target table request */
+async function performUpdate() {
+  if (!confirm('This will overwrite the target table to match the source table. This is a destructive action. Continue?')) {
+    return
+  }
+
+  loading.value = true
+  error.value = null
+  try {
+    const payload = {
+      databaseSource: databaseSource.value,
+      databaseTarget: databaseTarget.value,
+      tableName: tableName.value
+    }
+    const res = await fetch(apiUrl('/api/compare/update'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status} ${res.statusText} ${text}`)
+    }
+    const data = await res.json()
+    // Refresh the comparison view
+    await compare()
+  } catch (e) {
+    console.error(e)
+    error.value = `Update fallito: ${e.message || e}`
+    loading.value = false
+  }
+}
+
 /* utilities for rendering */
 function getSource(row) { return row.source || row.Source || {} }
 function getTarget(row) { return row.target || row.Target || {} }
@@ -452,6 +490,27 @@ button.primary:disabled { opacity: 0.6; cursor: not-allowed; box-shadow:none; }
 button.primary:hover:not(:disabled) { background: #d1d5db; }
 button.primary:focus { outline: 3px solid rgba(17,24,39,0.06); }
 
+/* update button - warning/destructive style */
+button.update-btn {
+  background: #ff9800; /* orange warning color */
+  color: #fff;
+  border: none;
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(15,23,42,0.06);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: var(--control-width);
+  height: 40px; /* same height as primary button */
+}
+button.update-btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+button.update-btn:hover:not(:disabled) { background: #e68900; }
+button.update-btn:focus { outline: 3px solid rgba(255,152,0,0.2); }
+
 /* spinner */
 .spinner {
   border: 3px solid #e6e9ee;
@@ -516,8 +575,8 @@ button.primary:focus { outline: 3px solid rgba(17,24,39,0.06); }
 }
 .scroll-area {
   flex: 1 1 auto;
-  max-height: calc(100vh - 260px);
-  overflow: auto; /* allow both horizontal and vertical scroll */
+  overflow-x: auto;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
 }
 
