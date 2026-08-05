@@ -4,30 +4,38 @@
       <div class="card top-card">
         <div class="controls">
           <div class="field">
-            <label>Database Source</label>
-            <select v-model="databaseSource" @change="onDatabaseChange">
-              <option value="" disabled selected>Select database</option>
-              <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
-            </select>
+            <label>Source Server</label>
+            <input v-model="sourceServer" type="text" placeholder="e.g. server.database.windows.net" />
           </div>
 
           <div class="field">
-            <label>Database Target</label>
-            <select v-model="databaseTarget" @change="onDatabaseChange">
-              <option value="" disabled selected>Select database</option>
-              <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
-            </select>
+            <label>Source Email</label>
+            <input v-model="sourceEmail" type="email" placeholder="user@domain.com" />
+          </div>
+
+          <div class="field">
+            <label>Target Server</label>
+            <input v-model="targetServer" type="text" placeholder="e.g. server.database.windows.net" />
+          </div>
+
+          <div class="field">
+            <label>Target Email</label>
+            <input v-model="targetEmail" type="email" placeholder="user@domain.com" />
           </div>
 
           <div class="field wide">
             <label>Table</label>
-            <select v-model="tableName" :disabled="tablesLoading || tableOptions.length === 0">
-              <option value="" disabled v-if="!tablesLoading && tableOptions.length">Select table</option>
-              <option v-if="tablesLoading" disabled>Loading tables...</option>
+            <select v-model="tableName" :disabled="tablesLoading">
+              <option value="" disabled selected>
+                {{ tablesLoading ? 'Loading tables...' : 'Select table' }}
+              </option>
               <option v-for="t in tableOptions" :key="t" :value="t">{{ t }}</option>
             </select>
-            <div class="hint" v-if="tableOptions.length === 0 && !tablesLoading && (databaseSource || databaseTarget)">
-              Nessuna tabella disponibile per la selezione.
+            <div class="hint" v-if="tableOptions.length === 0 && !tablesLoading && (sourceServer || targetServer)">
+              No common tables found. Check your server and database names.
+            </div>
+            <div class="hint" v-if="tablesLoading">
+              Fetching tables from source database...
             </div>
           </div>
 
@@ -113,22 +121,34 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 
+// Source/Target connection inputs (MFA with server + email)
+const sourceServer = ref('')
+const sourceEmail = ref('')
+const targetServer = ref('')
+const targetEmail = ref('')
+
 const databases = ref([])
 const sourceTables = ref([])
 const targetTables = ref([])
 const tableOptions = ref([])
 const tableName = ref('')
-const databaseSource = ref('')
-const databaseTarget = ref('')
 
 const rows = ref([])
 const loading = ref(false)
 const tablesLoading = ref(false)
 const error = ref(null)
 
+// Validation: check if email is in basic valid format
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
 // derived state
 const compareDisabled = computed(() => {
-  return loading.value || !databaseSource.value || !databaseTarget.value || !tableName.value
+  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
+  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+  const tableValid = tableName.value.trim() !== ''
+  return loading.value || !sourceValid || !targetValid || !tableValid
 })
 
 // derive columns from rows (union of keys across all rows)
@@ -153,37 +173,36 @@ function apiUrl(path) {
   return API_BASE.replace(/\/$/, '') + path
 }
 
-/* API calls */
-async function fetchDatabases() {
-  error.value = null
-  try {
-    const res = await fetch(apiUrl('/api/databases'))
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    databases.value = await res.json()
-    // set defaults if none
-    if (!databaseSource.value && databases.value.length) databaseSource.value = databases.value[0]
-    if (!databaseTarget.value && databases.value.length > 1) databaseTarget.value = databases.value[1] || databases.value[0]
-  } catch (e) {
-    console.error(e)
-    error.value = `Impossibile caricare i database: ${e.message || e}`
-  }
-}
-
-async function fetchTablesFor(db, targetRef) {
-  if (!db) {
+/* Fetch tables for a given server/database/email */
+async function fetchTablesFor(server, email, databaseName, targetRef) {
+  if (!server.trim() || !email.trim() || !databaseName.trim()) {
     targetRef.value = []
     return
   }
+
   tablesLoading.value = true
   error.value = null
   try {
-    const res = await fetch(apiUrl(`/api/tables?database=${encodeURIComponent(db)}`))
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    targetRef.value = Array.isArray(data) ? data : []
+    const res = await fetch(apiUrl('/api/tables/list-azure'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        server: server.trim(),
+        email: email.trim(),
+        databaseName: databaseName.trim()
+      })
+    })
+
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || `HTTP ${res.status}`)
+    }
+
+    const tables = await res.json()
+    targetRef.value = Array.isArray(tables) ? tables : []
   } catch (e) {
     console.error(e)
-    error.value = `Impossibile caricare le tabelle per ${db}: ${e.message || e}`
+    error.value = `Failed to load tables: ${e.message || e}`
     targetRef.value = []
   } finally {
     tablesLoading.value = false
@@ -191,44 +210,65 @@ async function fetchTablesFor(db, targetRef) {
   }
 }
 
-/* Compute table options (intersection preferred) */
+/* Compute table options (intersection of source and target tables) */
 function computeTableOptions() {
   const s = sourceTables.value || []
   const t = targetTables.value || []
+
   if (s.length && t.length) {
-    // intersection
+    // Get intersection - only tables that exist in both
     const inter = s.filter(x => t.includes(x))
-    tableOptions.value = inter.length ? inter : Array.from(new Set([...s, ...t]))
+    tableOptions.value = inter.length ? inter : []
   } else if (s.length) {
-    tableOptions.value = [...s]
+    tableOptions.value = s
   } else if (t.length) {
-    tableOptions.value = [...t]
+    tableOptions.value = t
   } else {
     tableOptions.value = []
   }
-  // reset selected table if not present
+
+  // Reset selected table if not present in options
   if (tableName.value && !tableOptions.value.includes(tableName.value)) {
     tableName.value = ''
   }
 }
 
-/* when DB changed */
-function onDatabaseChange() {
-  // fetch tables for each selected db
-  fetchTablesFor(databaseSource.value, sourceTables)
-  fetchTablesFor(databaseTarget.value, targetTables)
+/* Fetch tables when source or target connection details change */
+async function onConnectionChange() {
+  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
+  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+
+  if (sourceValid) {
+    // Fetch tables from source (assuming default database name)
+    await fetchTablesFor(sourceServer.value, sourceEmail.value, 'TrixCompareDb', sourceTables)
+  } else {
+    sourceTables.value = []
+  }
+
+  if (targetValid) {
+    // Fetch tables from target (assuming default database name)
+    await fetchTablesFor(targetServer.value, targetEmail.value, 'TrixCompareDb', targetTables)
+  } else {
+    targetTables.value = []
+  }
 }
+
 
 /* Compare request */
 async function compare() {
-  if (!databaseSource.value || !databaseTarget.value || !tableName.value) return
+  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
+  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+  if (!sourceValid || !targetValid || !tableName.value) return
+
   loading.value = true
   error.value = null
   rows.value = []
   try {
     const payload = {
-      databaseSource: databaseSource.value,
-      databaseTarget: databaseTarget.value,
+      sourceServer: sourceServer.value,
+      sourceEmail: sourceEmail.value,
+      targetServer: targetServer.value,
+      targetEmail: targetEmail.value,
       tableName: tableName.value
     }
     const res = await fetch(apiUrl('/api/compare'), {
@@ -263,8 +303,10 @@ async function performUpdate() {
   error.value = null
   try {
     const payload = {
-      databaseSource: databaseSource.value,
-      databaseTarget: databaseTarget.value,
+      sourceServer: sourceServer.value,
+      sourceEmail: sourceEmail.value,
+      targetServer: targetServer.value,
+      targetEmail: targetEmail.value,
       tableName: tableName.value
     }
     const res = await fetch(apiUrl('/api/compare/update'), {
@@ -397,13 +439,15 @@ function onTargetInput(e, ridx, col) {
 }
 
 onMounted(async () => {
-  await fetchDatabases()
-  // initial tables load if defaults set
-  if (databaseSource.value) fetchTablesFor(databaseSource.value, sourceTables)
-  if (databaseTarget.value) fetchTablesFor(databaseTarget.value, targetTables)
+  // With MFA-based connection, database/table discovery will happen after authentication in STEP 2
+  // For now, no initialization needed
 })
 
 watch([sourceTables, targetTables], () => computeTableOptions())
+
+// Watch for changes in connection fields to refetch tables
+watch([sourceServer, sourceEmail, targetServer, targetEmail], () => onConnectionChange())
+
 </script>
 
 <style scoped>
@@ -455,8 +499,9 @@ watch([sourceTables, targetTables], () => computeTableOptions())
 }
 .field.wide { width: var(--control-width); }
 .field label { font-size: 15px; margin-bottom: 6px; color: #374151; font-weight: 700; }
-.field select {
-  padding: 8px 10px;
+.field select,
+.field input {
+  padding: 8px -15px;
   height: 40px;
   border-radius: 8px;
   border: 1px solid #e6e9ee;
@@ -465,7 +510,8 @@ watch([sourceTables, targetTables], () => computeTableOptions())
   font-size: 14px;
   width: 100%;
 }
-.field select:disabled {
+.field select:disabled,
+.field input:disabled {
   opacity: 0.6;
 }
 
@@ -620,5 +666,12 @@ button.update-btn:focus { outline: 3px solid rgba(255,152,0,0.2); }
   .field, .field.wide { width: 100%; }
   .actions { margin-left: 0; }
   button.primary { width: 100%; }
+}
+
+/* hint text below inputs */
+.hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
 }
 </style>
