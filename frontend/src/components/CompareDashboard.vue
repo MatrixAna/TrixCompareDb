@@ -4,13 +4,13 @@
       <div class="card top-card">
         <div class="controls">
           <div class="field">
-            <label>Source Server</label>
-            <input v-model="sourceServer" type="text" placeholder="e.g. server.database.windows.net" />
+            <label>Email</label>
+            <input v-model="email" type="email" placeholder="user@domain.com" />
           </div>
 
           <div class="field">
-            <label>Source Email</label>
-            <input v-model="sourceEmail" type="email" placeholder="user@domain.com" />
+            <label>Source Server</label>
+            <input v-model="sourceServer" type="text" placeholder="e.g. server.database.windows.net" />
           </div>
 
           <div class="field">
@@ -19,8 +19,8 @@
           </div>
 
           <div class="field">
-            <label>Target Email</label>
-            <input v-model="targetEmail" type="email" placeholder="user@domain.com" />
+            <label>Database Name</label>
+            <input v-model="databaseName" type="text" placeholder="e.g. MyDatabase" />
           </div>
 
           <div class="field wide">
@@ -123,9 +123,9 @@ import { ref, computed, onMounted, watch } from 'vue'
 
 // Source/Target connection inputs (MFA with server + email)
 const sourceServer = ref('')
-const sourceEmail = ref('')
 const targetServer = ref('')
-const targetEmail = ref('')
+const databaseName = ref('')
+const email = ref('')
 
 const databases = ref([])
 const sourceTables = ref([])
@@ -145,8 +145,8 @@ function isValidEmail(email) {
 
 // derived state
 const compareDisabled = computed(() => {
-  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
-  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+  const sourceValid = sourceServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
+  const targetValid = targetServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
   const tableValid = tableName.value.trim() !== ''
   return loading.value || !sourceValid || !targetValid || !tableValid
 })
@@ -235,19 +235,19 @@ function computeTableOptions() {
 
 /* Fetch tables when source or target connection details change */
 async function onConnectionChange() {
-  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
-  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+  const sourceValid = sourceServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
+  const targetValid = targetServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
 
   if (sourceValid) {
-    // Fetch tables from source (assuming default database name)
-    await fetchTablesFor(sourceServer.value, sourceEmail.value, 'TrixCompareDb', sourceTables)
+    // Fetch tables from source using Azure AD MFA
+    await fetchTablesFor(sourceServer.value, email.value, databaseName.value, sourceTables)
   } else {
     sourceTables.value = []
   }
 
   if (targetValid) {
-    // Fetch tables from target (assuming default database name)
-    await fetchTablesFor(targetServer.value, targetEmail.value, 'TrixCompareDb', targetTables)
+    // Fetch tables from target using Azure AD MFA
+    await fetchTablesFor(targetServer.value, email.value, databaseName.value, targetTables)
   } else {
     targetTables.value = []
   }
@@ -256,8 +256,8 @@ async function onConnectionChange() {
 
 /* Compare request */
 async function compare() {
-  const sourceValid = sourceServer.value.trim() !== '' && isValidEmail(sourceEmail.value)
-  const targetValid = targetServer.value.trim() !== '' && isValidEmail(targetEmail.value)
+  const sourceValid = sourceServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
+  const targetValid = targetServer.value.trim() !== '' && databaseName.value.trim() !== '' && isValidEmail(email.value)
   if (!sourceValid || !targetValid || !tableName.value) return
 
   loading.value = true
@@ -266,9 +266,9 @@ async function compare() {
   try {
     const payload = {
       sourceServer: sourceServer.value,
-      sourceEmail: sourceEmail.value,
       targetServer: targetServer.value,
-      targetEmail: targetEmail.value,
+      databaseName: databaseName.value,
+      email: email.value,
       tableName: tableName.value
     }
     const res = await fetch(apiUrl('/api/compare'), {
@@ -304,9 +304,9 @@ async function performUpdate() {
   try {
     const payload = {
       sourceServer: sourceServer.value,
-      sourceEmail: sourceEmail.value,
       targetServer: targetServer.value,
-      targetEmail: targetEmail.value,
+      databaseName: databaseName.value,
+      email: email.value,
       tableName: tableName.value
     }
     const res = await fetch(apiUrl('/api/compare/update'), {
@@ -446,7 +446,7 @@ onMounted(async () => {
 watch([sourceTables, targetTables], () => computeTableOptions())
 
 // Watch for changes in connection fields to refetch tables
-watch([sourceServer, sourceEmail, targetServer, targetEmail], () => onConnectionChange())
+watch([sourceServer, targetServer, databaseName, email], () => onConnectionChange())
 
 </script>
 

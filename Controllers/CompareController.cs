@@ -1,4 +1,3 @@
-﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc;
 using TrixCompareDb.Data;
 using TrixCompareDb.Models;
@@ -28,37 +27,47 @@ namespace TrixCompareDb.Controllers
         {
             try
             {
-                // Check if using MFA-based authentication (new way) or legacy connection strings
+                // Manual validation: Check if using MFA-based authentication (new way) or legacy connection strings
                 bool useMfa = !string.IsNullOrEmpty(request.SourceServer) && 
-                             !string.IsNullOrEmpty(request.SourceEmail) &&
+                             !string.IsNullOrEmpty(request.Email) &&
                              !string.IsNullOrEmpty(request.TargetServer) && 
-                             !string.IsNullOrEmpty(request.TargetEmail);
+                             !string.IsNullOrEmpty(request.DatabaseName);
+
+                bool useLegacy = !string.IsNullOrEmpty(request.DatabaseSource) && 
+                                !string.IsNullOrEmpty(request.DatabaseTarget) &&
+                                !string.IsNullOrEmpty(request.SourceEmail) &&
+                                !string.IsNullOrEmpty(request.TargetEmail);
+
+                if (!useMfa && !useLegacy)
+                {
+                    return BadRequest(new { error = "Either provide MFA credentials (SourceServer, Email, TargetServer, DatabaseName) or legacy credentials (DatabaseSource, DatabaseTarget, SourceEmail, TargetEmail)." });
+                }
+
+                if (string.IsNullOrEmpty(request.TableName))
+                {
+                    return BadRequest(new { error = "TableName is required." });
+                }
+
+                // Support legacy fields for backward compatibility
+                string sourceEmail = request.Email ?? request.SourceEmail;
+                string targetEmail = request.Email ?? request.TargetEmail;
+                string databaseName = request.DatabaseName ?? request.SourceDatabase ?? request.TargetDatabase;
 
                 List<Dictionary<string, object>> source;
                 List<Dictionary<string, object>> target;
 
                 if (useMfa)
                 {
-                    // Extract database name from table name if it contains schema (e.g., "dbo.Products" -> "Products")
-                    // For MFA, we need to infer or use a default database name
-                    // If tableName is "dbo.Products", the database name should come from context
-                    // For now, use a parameter or ask user to provide it in future
-
-                    // Temporary: assume database name matches or is part of connection context
-                    // In production, add databaseName to request model
-                    string sourceDb = "TrixCompareDb";  // Default - should be configurable
-                    string targetDb = "TrixCompareDb";
-
                     source = await _repo.GetTableWithAzureADAsync(
                         request.SourceServer,
-                        sourceDb,
-                        request.SourceEmail,
+                        databaseName,
+                        sourceEmail,
                         request.TableName);
 
                     target = await _repo.GetTableWithAzureADAsync(
                         request.TargetServer,
-                        targetDb,
-                        request.TargetEmail,
+                        databaseName,
+                        targetEmail,
                         request.TableName);
                 }
                 else
@@ -94,18 +103,24 @@ namespace TrixCompareDb.Controllers
         {
             try
             {
+                // Manual validation: Support both new single email field and legacy separate fields
+                string sourceEmail = request.Email ?? request.SourceEmail;
+                string targetEmail = request.Email ?? request.TargetEmail;
+                string databaseName = request.DatabaseName ?? request.SourceDatabase ?? request.TargetDatabase;
+
                 // Validate request - need either legacy or MFA fields
                 bool useMfa = !string.IsNullOrEmpty(request.SourceServer) && 
-                             !string.IsNullOrEmpty(request.SourceEmail) &&
+                             !string.IsNullOrEmpty(sourceEmail) &&
                              !string.IsNullOrEmpty(request.TargetServer) && 
-                             !string.IsNullOrEmpty(request.TargetEmail);
+                             !string.IsNullOrEmpty(targetEmail) &&
+                             !string.IsNullOrEmpty(databaseName);
 
                 bool useLegacy = !string.IsNullOrEmpty(request.DatabaseSource) && 
                                 !string.IsNullOrEmpty(request.DatabaseTarget);
 
                 if (!useMfa && !useLegacy)
                 {
-                    return BadRequest(new { error = "Either provide MFA credentials (SourceServer, SourceEmail, TargetServer, TargetEmail) or legacy database names (DatabaseSource, DatabaseTarget)." });
+                    return BadRequest(new { error = "Either provide MFA credentials (SourceServer, DatabaseName, Email, TargetServer) or legacy database names (DatabaseSource, DatabaseTarget)." });
                 }
 
                 if (string.IsNullOrEmpty(request.TableName))
@@ -118,16 +133,13 @@ namespace TrixCompareDb.Controllers
                 if (useMfa)
                 {
                     // Use Azure AD authentication
-                    string sourceDb = "TrixCompareDb";  // Default - should be configurable
-                    string targetDb = "TrixCompareDb";
-
                     result = await _updateService.UpdateTargetTableWithAzureADAsync(
                         request.SourceServer,
-                        sourceDb,
-                        request.SourceEmail,
+                        databaseName,
+                        sourceEmail,
                         request.TargetServer,
-                        targetDb,
-                        request.TargetEmail,
+                        databaseName,
+                        targetEmail,
                         request.TableName);
                 }
                 else
